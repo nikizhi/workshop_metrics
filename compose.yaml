@@ -1,0 +1,87 @@
+services:
+  db:
+    image: postgres:18
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_DB=${DB_NAME?Variable not set}
+      - POSTGRES_USER=${DB_USER?Variable not set}
+      - POSTGRES_PASSWORD=${DB_PASSWORD?Variable not set}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+  
+  redis:
+    image: redis:8
+    restart: always
+    ports:
+      - "6379:6379"
+  
+  api:
+    build: .
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=db
+      - REDIS_HOST=redis
+    depends_on:
+      - db
+      - redis
+    ports:
+      - "8000:8000"
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0"]
+  
+  worker:
+    build: .
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=db
+      - REDIS_HOST=redis
+    depends_on:
+      - db
+      - redis
+    command: ["celery", "-A", "app.core.celery_app:celery_app", "worker", "--loglevel", "info", "-Q", "default,priority", "-E"]
+
+  flower:
+    build: .
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - REDIS_HOST=redis
+    depends_on:
+      - redis
+      - worker
+    ports:
+      - "5555:5555"
+    command: ["celery", "-A", "app.core.celery_app", "flower"]
+
+  prometheus:
+    image: prom/prometheus
+    restart: always
+    depends_on:
+      - api
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yaml:/etc/prometheus/prometheus.yml:ro
+
+  grafana:
+    image: grafana/grafana
+    restart: always
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+
+volumes:
+  postgres_data:
+  grafana_data:
